@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- New effect `wormhole`: the code spirals into a blue mouth (blue shift) and, after the rest, spirals out of a second mouth in another part of the editor.
+- New effect `supernova`: a star core forms, collapses and explodes (flash, shockwave); the code blows outward white-hot; a nebula fades; on restore the code implodes back.
+- Cosmic effects are now specs (`src/cosmic.js`) drawn by one renderer (`src/cosmic-renderer.js`).
+- `holeScale` also sets the wormhole and supernova size.
+- Fix: the last flash level of the black hole stayed on (alpha 0.02) during the rest.
+
 ## 0.3.2
 
 - Black hole size follows the screen: the radius grows with the number of visible lines (about 11% of the visible height, 1.2 to 6 lines). A taller editor gets a larger hole.

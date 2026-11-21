@@ -4,10 +4,30 @@ Custom visual effects for the VS Code editor.
 
 | Effect | Extension | What it does |
 |---|---|---|
-| Black hole | [`black-hole-break`](black-hole-break) | On a timer, the code spirals into a black hole. The editor stays empty for a short eye rest. Then the code spirals back out. |
-| Dust | [`black-hole-break`](black-hole-break) (`"blackHoleBreak.effect": "dust"`) | The code turns grey, breaks into dust and blows away. Then the dust flies back. |
+All effects are in one extension, [`black-hole-break`](black-hole-break). Select one with `blackHoleBreak.effect`.
+
+| Effect | `blackHoleBreak.effect` | What it does |
+|---|---|---|
+| Black hole (default) | `"blackHole"` | On a timer, the code spirals into a black hole. The hole collapses with a flash. The editor stays empty for a short eye rest. Then the code spirals back out. |
+| Wormhole | `"wormhole"` | The code spirals into a blue wormhole mouth (blue shift). After the rest, it spirals out of a second mouth in another part of the editor. |
+| Supernova | `"supernova"` | A star core forms and pulls the code in. Then it explodes: a flash, a shockwave, and the code blows outward, white-hot. A nebula fades away. On restore, the code implodes back. |
+| Dust | `"dust"` | The code turns grey, breaks into dust and blows away. Then the dust flies back. |
 
 ![Black hole effect](black-hole-break/media/preview-blackhole.gif)
+
+<details>
+<summary>Wormhole effect</summary>
+
+![Wormhole effect](black-hole-break/media/preview-wormhole.gif)
+
+</details>
+
+<details>
+<summary>Supernova effect</summary>
+
+![Supernova effect](black-hole-break/media/preview-supernova.gif)
+
+</details>
 
 <details>
 <summary>Dust effect</summary>
@@ -91,8 +111,8 @@ To change them, open **Settings** (`Cmd+,`) and search for `blackHoleBreak`, or 
 
 ```jsonc
 {
-  "blackHoleBreak.effect": "blackHole",          // or "dust"
-  "blackHoleBreak.holeScale": 1,                 // black hole size x (0.5-3); it also grows with the editor height
+  "blackHoleBreak.effect": "blackHole",          // "wormhole", "supernova" or "dust"
+  "blackHoleBreak.holeScale": 1,                 // hole / star size x (0.5-3); it also grows with the editor height
   "blackHoleBreak.intervalMinutes": 10,          // active minutes between breaks
   "blackHoleBreak.restSeconds": 20,              // length of the empty-editor rest
   "blackHoleBreak.activeHours": "",              // e.g. "09:00-12:30, 13:30-18:00"; empty = all day
@@ -112,8 +132,9 @@ All settings, the commands and the time model are in [`black-hole-break/README.m
 | Path | Contents |
 |---|---|
 | `black-hole-break/` | The VS Code extension (JavaScript, no build step, no runtime dependencies) |
-| `black-hole-break/src/blackhole.js` | Black hole effect: pure logic (spiral vectors, stages, hole size, CSS) |
-| `black-hole-break/src/blackhole-renderer.js` | Black hole effect: VS Code decorations |
+| `black-hole-break/src/blackhole.js` | Shared grain engine (vectors, timing, spiral stages) and the black hole look |
+| `black-hole-break/src/cosmic.js` | Effect specs: black hole, wormhole, supernova (pure logic, no `vscode`) |
+| `black-hole-break/src/cosmic-renderer.js` | VS Code decorations for any cosmic spec |
 | `black-hole-break/src/core.js` | Dust effect: pure logic, and the schedule parser |
 | `black-hole-break/src/renderer.js` | Dust effect: VS Code decorations |
 | `black-hole-break/src/timeline.js`, `timer.js` | Animation clock, active-time counter |
@@ -130,14 +151,14 @@ The preview uses the Monaco editor (the editor inside VS Code) and the same deco
 ```bash
 cd preview
 npm install
-npm run serve            # opens preview/index.html: effect switch, Play break, timeline slider
+npm run serve            # opens preview/index.html: effect switch (4 effects), Play break, timeline slider
 ```
 
 To record the GIFs again (needs Chrome or Chromium and `ffmpeg`):
 
 ```bash
-CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npm run record:blackhole
-CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npm run record:dust
+CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npm run record:all
+# or one: record:blackhole, record:wormhole, record:supernova, record:dust
 ```
 
 ## How an effect works
@@ -147,7 +168,10 @@ CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npm r
 3. Each look is a VS Code text decoration type. VS Code copies the `textDecoration` value into the CSS rule, so a decoration can add `transform`, `filter` and CSS custom properties.
 4. The clock adds real elapsed time to `t`. A lower frame rate gives fewer frames, not a longer animation. Reverse play gives an exact restore.
 
-To add an effect: write a pure module (like `src/blackhole.js`) and a renderer with the same methods as `BlackHoleRenderer` (`kind`, `duration`, `begin`, `add`, `sync`, `invalidate`, `setMessage`, `render`, `clear`, `dispose`). Then add its name to `blackHoleBreak.effect` in `package.json` and to the selection in `extension.js`.
+To add an effect, use one of these:
+
+- **Cosmic spec** (grains that move relative to one or more anchor points): add a spec to `SPECS` in `src/cosmic.js` with `name`, `DURATION`, `TYPE_COUNT`, `GONE`, `FLASH`, `profile`, `anchors()`, `anchorIndex()`, `stageOptions()`, `overlays()`, `flashLevel()` and `flashOptions()`. `CosmicRenderer` draws it, and the preview page shows it. Add its name to the `blackHoleBreak.effect` enum in `package.json`.
+- **Own renderer**: write a class with the same methods as `CosmicRenderer` (`kind`, `duration`, `begin`, `add`, `sync`, `invalidate`, `setMessage`, `render`, `clear`, `dispose`, and optional `setReturning`). Then add it to the selection in `extension.js`.
 
 ## License
 

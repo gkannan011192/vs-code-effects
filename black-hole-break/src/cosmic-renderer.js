@@ -1,19 +1,22 @@
 /*
- * Black hole renderer (VS Code decorations).
+ * Renderer for the cosmic effects (black hole, wormhole, supernova).
+ * The effect itself is a pure spec from ./cosmic.js; this file only turns
+ * the spec into VS Code decorations.
  *
- * Per chunk, three inline decorations stack on the same range:
+ * Per grain, three inline decorations stack on the same range:
  *   vecX type  -> --bh-x   (one type per half-column offset, made on demand)
  *   vecY type  -> --bh-y   (one type per line offset, made on demand)
- *   stage type -> spiral transform that reads --bh-x / --bh-y
- * Vector decorations change only when the visible window changes; each frame
- * only re-assigns the stage types. The hole is two empty attachments
- * (disk + event horizon) at the hole line; their types are made on demand
- * per (column, size, angle) and disposed after the break.
+ *   stage type -> transform that reads --bh-x / --bh-y
+ * Vector decorations change only when the visible window or the anchor
+ * changes. Each frame re-assigns only the stage types and the overlays.
+ * Overlay types (hole, ring, nebula, ...) are made on demand per break and
+ * disposed after it.
  */
 'use strict';
 
 const vscode = require('vscode');
 const bh = require('./blackhole');
+const cosmic = require('./cosmic');
 
 const MARGIN = 6;
 
@@ -26,46 +29,61 @@ function hashRanges(list) {
   return h;
 }
 
-class BlackHoleRenderer {
-  /** @param {{ghostOpacity: number, flash: boolean, holeScale?: number}} opts */
-  constructor(opts) {
-    this.kind = 'blackHole';
+class CosmicRenderer {
+  /**
+   * @param {string} effect  'blackHole' | 'wormhole' | 'supernova'
+   * @param {{ghostOpacity: number, flash: boolean, holeScale?: number}} opts
+   */
+  constructor(effect, opts) {
+    this.spec = cosmic.getSpec(effect);
+    this.kind = this.spec.name;
     this.opts = opts;
     this.seed = 1;
+    this.returning = false;
     this.entries = new Map();
     this.message = null;
+    const make = (o) => vscode.window.createTextEditorDecorationType(o);
     this.stageTypes = [];
-    for (let i = 0; i < bh.TYPE_COUNT; i++) {
-      this.stageTypes.push(vscode.window.createTextEditorDecorationType(bh.stageOptions(i, opts.ghostOpacity)));
-    }
+    for (let i = 0; i < this.spec.TYPE_COUNT; i++) this.stageTypes.push(make(this.spec.stageOptions(i, opts.ghostOpacity)));
     this.flashTypes = [];
-    for (let i = 0; i < bh.FLASH; i++) this.flashTypes.push(vscode.window.createTextEditorDecorationType(bh.flashOptions(i)));
-    this.msgType = vscode.window.createTextEditorDecorationType({
+    for (let i = 0; i < this.spec.FLASH; i++) this.flashTypes.push(make(this.spec.flashOptions(i)));
+    this.msgType = make({
       before: { color: new vscode.ThemeColor('editorCodeLens.foreground'), fontStyle: 'italic', margin: '0 0 0 6ch' }
     });
-    this.vecTypes = new Map();   // 'x12' / 'y-3' -> type (kept for the session)
-    this.holeTypes = new Map();  // per-break, disposed in clear()
+    this.vecTypes = new Map();      // 'x12' / 'y-3' -> type (kept for the session)
+    this.overlayTypes = new Map();  // per break, disposed in clear()
   }
 
-  get duration() { return bh.DURATION; }
+  get duration() { return this.spec.DURATION; }
 
   begin(seed, editors) {
     this.seed = seed;
+    this.returning = false;
     this.entries.clear();
     this.message = null;
     editors.forEach((e) => this.add(e));
   }
 
+  /**
+   * Called when the code is fully gone (rest starts). Effects with an exit
+   * (wormhole) bring the code back from another anchor. Nothing is visible
+   * at that moment, so the vector switch cannot be seen.
+   */
+  setReturning(on) {
+    if (this.returning === on) return;
+    this.returning = on;
+    for (const entry of this.entries.values()) entry.winKey = '';
+  }
+
   add(editor) {
     if (this.entries.has(editor)) return;
     this.entries.set(editor, {
-      hole: null,
-      cache: new Map(),
+      anchors: null,
+      cache: new Map(),             // `${anchorIndex}:${line}` -> chunks
       winKey: '',
-      vecHash: new Map(),        // vec type -> hash of ranges set
-      last: new Array(bh.TYPE_COUNT).fill(0),
-      holeKey: null,
-      holeSet: [],               // hole types currently set on this editor
+      vecHash: new Map(),           // vec type -> hash of ranges set
+      last: new Array(this.spec.TYPE_COUNT).fill(0),
+      overlays: new Map(),          // key -> type currently set
       lastFlash: -2,
       lastMsg: null
     });
@@ -90,9 +108,9 @@ class BlackHoleRenderer {
     return t;
   }
 
-  _holeType(key, make) {
-    let t = this.holeTypes.get(key);
-    if (!t) { t = vscode.window.createTextEditorDecorationType(make()); this.holeTypes.set(key, t); }
+  _overlayType(key, opts) {
+    let t = this.overlayTypes.get(key);
+    if (!t) { t = vscode.window.createTextEditorDecorationType(opts); this.overlayTypes.set(key, t); }
     return t;
   }
 
@@ -107,6 +125,7 @@ class BlackHoleRenderer {
   }
 
   _renderEditor(ed, entry, t) {
+    const spec = this.spec;
     const doc = ed.document;
     const vr = ed.visibleRanges;
     if (!vr.length || doc.lineCount === 0) return;
@@ -117,27 +136,29 @@ class BlackHoleRenderer {
     const lo = Math.max(0, first - MARGIN);
     const hi = Math.min(last, end + MARGIN);
 
-    if (!entry.hole) {
+    if (!entry.anchors) {
       const texts = [];
       for (let l = first; l <= Math.min(end, last); l++) texts.push(doc.lineAt(l).text);
-      entry.hole = bh.pickHole(texts, first, tab, this.opts.holeScale || 1);
-      entry.hole.line = Math.min(entry.hole.line, last);
+      entry.anchors = spec.anchors(texts, first, tab, this.opts.holeScale || 1)
+        .map((a) => Object.assign({}, a, { line: Math.min(a.line, last) }));
     }
-    const hole = entry.hole;
+    const idx = Math.min(spec.anchorIndex(this.returning), entry.anchors.length - 1);
+    const anchor = entry.anchors[idx];
 
-    // chunks for the window
+    // grains for the window, relative to the active anchor
     const lines = [];
     for (let line = lo; line <= hi; line++) {
-      let chunks = entry.cache.get(line);
+      const key = `${idx}:${line}`;
+      let chunks = entry.cache.get(key);
       if (!chunks) {
-        chunks = bh.lineChunks(doc.lineAt(line).text, line, this.seed, tab, hole);
-        entry.cache.set(line, chunks);
+        chunks = bh.lineChunks(doc.lineAt(line).text, line, this.seed, tab, anchor, spec.profile);
+        entry.cache.set(key, chunks);
       }
       lines.push([line, chunks]);
     }
 
-    // vector decorations: only when the window changes
-    const winKey = `${lo}:${hi}`;
+    // vector decorations: only when the window or the anchor changes
+    const winKey = `${idx}|${lo}:${hi}`;
     if (winKey !== entry.winKey) {
       const groups = new Map();
       const push = (key, opts, range) => {
@@ -163,7 +184,7 @@ class BlackHoleRenderer {
     }
 
     // stage decorations: every frame
-    const buckets = Array.from({ length: bh.TYPE_COUNT }, () => []);
+    const buckets = Array.from({ length: spec.TYPE_COUNT }, () => []);
     for (const [line, chunks] of lines) {
       for (const c of chunks) {
         const s = bh.chunkState(c, t);
@@ -171,33 +192,30 @@ class BlackHoleRenderer {
       }
     }
     if (t > 0) {
-      if (lo > 0) buckets[bh.GONE].push(new vscode.Range(0, 0, lo - 1, doc.lineAt(lo - 1).text.length));
-      if (hi < last) buckets[bh.GONE].push(new vscode.Range(hi + 1, 0, last, doc.lineAt(last).text.length));
+      if (lo > 0) buckets[spec.GONE].push(new vscode.Range(0, 0, lo - 1, doc.lineAt(lo - 1).text.length));
+      if (hi < last) buckets[spec.GONE].push(new vscode.Range(hi + 1, 0, last, doc.lineAt(last).text.length));
     }
-    for (let i = 0; i < bh.TYPE_COUNT; i++) {
+    for (let i = 0; i < spec.TYPE_COUNT; i++) {
       const h = hashRanges(buckets[i]);
       if (h !== entry.last[i]) { ed.setDecorations(this.stageTypes[i], buckets[i]); entry.last[i] = h; }
     }
 
-    // the hole
-    const lvl = bh.holeLevel(t);
-    const holeKey = lvl ? `${lvl.size}|${lvl.angle}` : null;
-    if (holeKey !== entry.holeKey) {
-      entry.holeSet.forEach((type) => ed.setDecorations(type, []));
-      entry.holeSet = [];
-      if (lvl) {
-        const at = [new vscode.Range(hole.line, 0, hole.line, 0)];
-        const disk = this._holeType(`d${hole.col}|${hole.radius}|${holeKey}`, () => ({ before: bh.diskOptions(hole.col, lvl.size, lvl.angle, hole.radius) }));
-        const shadow = this._holeType(`s${hole.col}|${hole.radius}|${lvl.size}`, () => ({ after: bh.shadowOptions(hole.col, lvl.size, hole.radius) }));
-        ed.setDecorations(disk, at);
-        ed.setDecorations(shadow, at);
-        entry.holeSet = [disk, shadow];
-      }
-      entry.holeKey = holeKey;
+    // overlays (hole, mouths, core, shock ring, nebula, ...)
+    const wanted = new Map();
+    for (const o of spec.overlays(t, entry.anchors, idx)) wanted.set(o.key, o);
+    for (const [key, type] of entry.overlays) {
+      if (!wanted.has(key)) { ed.setDecorations(type, []); entry.overlays.delete(key); }
+    }
+    for (const [key, o] of wanted) {
+      if (entry.overlays.has(key)) continue;
+      const type = this._overlayType(key, o.opts);
+      const line = Math.min(o.line, last);
+      ed.setDecorations(type, [new vscode.Range(line, 0, line, 0)]);
+      entry.overlays.set(key, type);
     }
 
-    // flash at the collapse
-    const level = this.opts.flash ? bh.flashLevel(t) : -1;
+    // flash
+    const level = this.opts.flash ? spec.flashLevel(t) : -1;
     if (level !== entry.lastFlash) {
       const whole = [new vscode.Range(lo, 0, hi, 0)];
       this.flashTypes.forEach((type, i) => ed.setDecorations(type, i === level ? whole : []));
@@ -226,13 +244,13 @@ class BlackHoleRenderer {
         this.stageTypes.forEach((type) => ed.setDecorations(type, []));
         this.flashTypes.forEach((type) => ed.setDecorations(type, []));
         for (const [type] of entry.vecHash) ed.setDecorations(type, []);
-        entry.holeSet.forEach((type) => ed.setDecorations(type, []));
+        for (const type of entry.overlays.values()) ed.setDecorations(type, []);
         ed.setDecorations(this.msgType, []);
       } catch (err) { /* editor gone */ }
     }
     this.entries.clear();
-    this.holeTypes.forEach((type) => type.dispose());
-    this.holeTypes.clear();
+    this.overlayTypes.forEach((type) => type.dispose());
+    this.overlayTypes.clear();
   }
 
   dispose() {
@@ -245,4 +263,4 @@ class BlackHoleRenderer {
   }
 }
 
-module.exports = { BlackHoleRenderer };
+module.exports = { CosmicRenderer };

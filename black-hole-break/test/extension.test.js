@@ -177,3 +177,53 @@ test('black hole: chunks get vectors, spiral in, hole shows, all cleaned up', as
   assert.strictEqual(totalRanges(fake.decorations), 0, 'all decorations removed after the break');
   ctx.subscriptions.forEach((d) => d.dispose());
 });
+
+const overlayRanges = (decorations) => [...decorations].filter(([t, r]) =>
+  (t.opts.before || t.opts.after) && r.length && !(t.opts.before && t.opts.before.margin));
+
+test('wormhole: in through mouth A, rest, out of mouth B, cleaned up', async () => {
+  const fake = makeVscode(LINES);
+  Object.assign(fake.config, { effect: 'wormhole', restSeconds: 3, animationSpeed: 4, fps: 60, message: 'Rest' });
+  const ext = loadExtension(fake);
+  const ctx = { subscriptions: [] };
+  ext.activate(ctx);
+
+  await fake.commands['blackHoleBreak.breakNow']();
+  await sleep(400);
+  const inbound = overlayRanges(fake.decorations);
+  assert.strictEqual(inbound.length, 2, 'swirl + throat of mouth A');
+  const lineA = inbound[0][1][0].start.line;
+  assert.ok(totalRanges(fake.decorations, (t) => /rgba\(120,190,255/.test(t.opts.textDecoration || '')) > 0, 'blue-shifted grains');
+
+  await sleep(1100 + 3000 + 300); // rest done, about 1.2 s of the return at 4x
+  const outbound = overlayRanges(fake.decorations);
+  assert.strictEqual(outbound.length, 2, 'swirl + throat of mouth B');
+  assert.notStrictEqual(outbound[0][1][0].start.line, lineA, 'the exit mouth is on another line');
+
+  await sleep(1500);
+  assert.strictEqual(totalRanges(fake.decorations), 0, 'all decorations removed');
+  ctx.subscriptions.forEach((d) => d.dispose());
+});
+
+test('supernova: core, blast outward, nebula, rest, implode back, cleaned up', async () => {
+  const fake = makeVscode(LINES);
+  Object.assign(fake.config, { effect: 'supernova', restSeconds: 3, animationSpeed: 4, fps: 60, message: 'Rest' });
+  const ext = loadExtension(fake);
+  const ctx = { subscriptions: [] };
+  ext.activate(ctx);
+
+  await fake.commands['blackHoleBreak.breakNow']();
+  await sleep(300); // t ~ 1.2 s: after the explosion
+  const keys = overlayRanges(fake.decorations).map(([t]) => t.opts.before || t.opts.after);
+  assert.ok(keys.length >= 2, 'shock ring / nebula / star shown');
+  assert.ok(totalRanges(fake.decorations, (t) => /brightness\(2/.test(t.opts.textDecoration || '')) > 0, 'white-hot grains');
+
+  await sleep(900); // past 4.05 s / 4: rest
+  assert.strictEqual(overlayRanges(fake.decorations).length, 0, 'empty editor during the rest');
+  const gone = [...fake.decorations].find(([t]) => t.opts.opacity === '0');
+  assert.ok(gone && gone[1].length > 0);
+
+  await sleep(3000 + 1400);
+  assert.strictEqual(totalRanges(fake.decorations), 0, 'all decorations removed');
+  ctx.subscriptions.forEach((d) => d.dispose());
+});

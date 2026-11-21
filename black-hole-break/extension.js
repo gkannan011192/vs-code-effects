@@ -2,9 +2,9 @@
  * Black-Hole Break: a timed eye break for VS Code.
  *
  * After N minutes of active time (inside your schedule), the code in the
- * visible editors falls into a black hole (or turns to dust), the editor
- * stays empty for a short rest, then the animation plays backward and the
- * code comes back.
+ * visible editors goes away with an effect (black hole, wormhole, supernova
+ * or dust), the editor stays empty for a short rest, then the animation
+ * plays backward and the code comes back.
  */
 'use strict';
 
@@ -14,7 +14,8 @@ const core = require('./src/core');
 const { Timeline } = require('./src/timeline');
 const { BreakTimer } = require('./src/timer');
 const { DustRenderer } = require('./src/renderer');
-const { BlackHoleRenderer } = require('./src/blackhole-renderer');
+const { CosmicRenderer } = require('./src/cosmic-renderer');
+const cosmic = require('./src/cosmic');
 
 const SECTION = 'blackHoleBreak';
 const EXCLUDED_SCHEMES = new Set(['output', 'debug', 'vscode-terminal']);
@@ -44,7 +45,10 @@ function readConfig() {
     fps: Math.min(60, Math.max(10, c.get('fps', 30))),
     flash: c.get('flash', true),
     holeScale: Math.min(3, Math.max(0.5, c.get('holeScale', 1))),
-    effect: c.get('effect', 'blackHole') === 'dust' ? 'dust' : 'blackHole'
+    effect: (() => {
+      const name = c.get('effect', 'blackHole');
+      return name === 'dust' || cosmic.EFFECTS.includes(name) ? name : 'blackHole';
+    })()
   };
 }
 
@@ -151,7 +155,7 @@ class DustBreak {
     if (this.renderer && this.renderer.kind !== this.cfg.effect) { this.renderer.dispose(); this.renderer = null; }
     if (!this.renderer) {
       const opts = { ghostOpacity: this.cfg.ghostOpacity, flash: this.cfg.flash, holeScale: this.cfg.holeScale };
-      this.renderer = this.cfg.effect === 'dust' ? new DustRenderer(opts) : new BlackHoleRenderer(opts);
+      this.renderer = this.cfg.effect === 'dust' ? new DustRenderer(opts) : new CosmicRenderer(this.cfg.effect, opts);
     }
     const timeline = new Timeline(this.renderer.duration);
     timeline.speed = this.cfg.speed;
@@ -184,6 +188,7 @@ class DustBreak {
     if (s.phase === 'out' && s.timeline.atEnd()) {
       s.phase = 'rest';
       s.restEnd = now + this.cfg.restMs;
+      if (typeof this.renderer.setReturning === 'function') this.renderer.setReturning(true); // wormhole: exit mouth
     }
     if (s.phase === 'rest') {
       const left = s.restEnd - now;

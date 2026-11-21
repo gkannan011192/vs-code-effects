@@ -5,7 +5,10 @@
   "scripts": {
     "serve": "npx --yes http-server -c-1 -o /preview/index.html ..",
     "record:blackhole": "node record.mjs blackHole ../black-hole-break/media/preview-blackhole.gif",
-    "record:dust": "node record.mjs dust ../black-hole-break/media/preview-dust.gif"
+    "record:dust": "node record.mjs dust ../black-hole-break/media/preview-dust.gif",
+    "record:wormhole": "node record.mjs wormhole ../black-hole-break/media/preview-wormhole.gif",
+    "record:supernova": "node record.mjs supernova ../black-hole-break/media/preview-supernova.gif",
+    "record:all": "npm run record:blackhole && npm run record:wormhole && npm run record:supernova && npm run record:dust"
   },
   "devDependencies": {
     "monaco-editor": "0.52.0",

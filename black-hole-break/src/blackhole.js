@@ -50,7 +50,7 @@
     collapseEnd: 4.7,
     flashTime: 0.3
   };
-  const DURATION = TIMING.collapseEnd + TIMING.flashTime;
+  const DURATION = TIMING.collapseEnd + TIMING.flashTime + 0.05; // margin: the flash ends before the rest
 
   const THETA = [3.6, 4.6, 5.6, 6.6];   // total orbit angle per variant (rad)
 
@@ -124,15 +124,22 @@
     return {
       line: firstLine + Math.floor(lineTexts.length / 2),
       col: clamp(Math.round(maxLen * 0.5), minCol, Math.max(minCol, 60)),
-      radius
+      radius,
+      span: lineTexts.length,
+      maxLen
     };
   }
 
   /**
    * Chunks of one line with their vector to the hole and their timing.
-   * Deterministic for (text, line, seed, hole).
+   * Deterministic for (text, line, seed, hole, profile).
+   * profile: timing fields as TIMING, plus `minDist` (columns): vectors
+   * shorter than this are stretched to it (outward effects need a minimum
+   * push; the timing still uses the true distance).
    */
-  function lineChunks(text, line, seed, tabSize, hole) {
+  function lineChunks(text, line, seed, tabSize, hole, profile = TIMING) {
+    const P = profile;
+    const minDist = P.minDist || 0;
     const out = [];
     const rand = mulberry32(Math.floor(hash2(line, 11, seed) * 4294967296));
     const n = text.length;
@@ -153,21 +160,30 @@
       while (k < j) {
         const len = Math.min(j - k, 1 + Math.floor(rand() * maxLen));
         const vcol = col + (k - i);
-        const vx = clamp(Math.round(2 * (vcol + len / 2 - hole.col)), -VX_MAX, VX_MAX); // half-columns
+        let vx = clamp(Math.round(2 * (vcol + len / 2 - hole.col)), -VX_MAX, VX_MAX); // half-columns
+        let cvy = vy;
         const dist = Math.hypot(vx * 0.5, vy * LINE_IN_COLUMNS);
         const dn = Math.min(1, dist / 70);
-        const delay = TIMING.firstAt + TIMING.drainLead +
-          TIMING.sweep * Math.pow(dn, 0.85) +
-          TIMING.noise * (valueNoise(vcol * 0.08, line * 0.25, seed) - 0.5) +
-          TIMING.jitter * rand();
+        const delay = P.firstAt + P.drainLead +
+          P.sweep * Math.pow(dn, 0.85) +
+          P.noise * (valueNoise(vcol * 0.08, line * 0.25, seed) - 0.5) +
+          P.jitter * rand();
+        const life = P.lifeMin + (P.lifeMax - P.lifeMin) * rand();
+        const variant = Math.floor(rand() * VARIANTS);
+        if (minDist > 0 && dist < minDist) {
+          const a = dist > 0.01 ? Math.atan2(vy * LINE_IN_COLUMNS, vx * 0.5) : rand() * Math.PI * 2;
+          vx = Math.round(2 * minDist * Math.cos(a));
+          cvy = Math.round((minDist * Math.sin(a) / LINE_IN_COLUMNS) * 4) / 4; // quarter lines
+        }
         out.push({
           start: k,
           end: k + len,
           vx,
-          vy,
-          delay: Math.max(TIMING.firstAt + TIMING.drainLead, delay),
-          life: TIMING.lifeMin + (TIMING.lifeMax - TIMING.lifeMin) * rand(),
-          variant: Math.floor(rand() * VARIANTS)
+          vy: cvy,
+          delay: Math.max(P.firstAt + P.drainLead, delay),
+          life,
+          lead: P.drainLead,
+          variant
         });
         k += len;
       }
@@ -184,8 +200,9 @@
       const p = (t - c.delay) / c.life;
       return DRAIN + c.variant * STAGES + Math.min(STAGES - 1, Math.floor(p * STAGES));
     }
-    const d0 = c.delay - TIMING.drainLead;
-    if (t >= d0) return Math.min(DRAIN - 1, Math.floor(((t - d0) / TIMING.drainLead) * DRAIN));
+    const lead = c.lead || TIMING.drainLead;
+    const d0 = c.delay - lead;
+    if (t >= d0) return Math.min(DRAIN - 1, Math.floor(((t - d0) / lead) * DRAIN));
     return NORMAL;
   }
 
@@ -220,7 +237,7 @@
 
   function flashLevel(t) {
     const s = t - TIMING.collapseEnd;
-    if (s <= 0 || s > TIMING.flashTime) return -1;
+    if (s <= 0 || s >= TIMING.flashTime) return -1;
     return Math.min(FLASH - 1, Math.floor((s / TIMING.flashTime) * FLASH));
   }
 
@@ -237,12 +254,20 @@
       `calc(${fix(B)} * var(--bh-x, 0px) + ${fix(A)} * var(--bh-y, 0px))`;
   }
 
-  function stageOptions(i, ghostOpacity) {
+  /** Colour of the falling grains: hot = orange (black hole), blue = blue shift (wormhole). */
+  const PALETTES = {
+    hot: { hue: -25, glow: '255,150,60', drainHue: 0 },
+    blue: { hue: 175, glow: '120,190,255', drainHue: 150 }
+  };
+
+  function stageOptions(i, ghostOpacity, palette = 'hot') {
+    const pal = PALETTES[palette] || PALETTES.hot;
     if (i < DRAIN) {
       const g = (i + 1) / DRAIN;
       return {
         textDecoration: `none; display: inline-block; ${translate(-0.04 * g, 0)}; ` +
-          `filter: sepia(${fix(0.5 * g, 2)}) saturate(${fix(1 + 0.6 * g, 2)}) brightness(${fix(1 - 0.2 * g, 2)})`
+          `filter: sepia(${fix(0.5 * g, 2)}) saturate(${fix(1 + 0.6 * g, 2)}) ` +
+          `hue-rotate(${fix(pal.drainHue * g, 1)}deg) brightness(${fix(1 - 0.2 * g, 2)})`
       };
     }
     if (i === GONE) return { opacity: String(ghostOpacity), textDecoration: 'none' };
@@ -261,9 +286,9 @@
       opacity: String(fix(Math.max(opacity, ghostOpacity), 3)),
       textDecoration: `none; display: inline-block; ${translate(A, B)}; ` +
         `rotate: ${fix((theta * 180) / Math.PI, 1)}deg; scale: ${fix(scale)}; ` +
-        `filter: sepia(${fix(heat, 2)}) saturate(${fix(1 + 3 * heat, 2)}) hue-rotate(${fix(-25 * heat, 1)}deg) ` +
+        `filter: sepia(${fix(heat, 2)}) saturate(${fix(1 + 3 * heat, 2)}) hue-rotate(${fix(pal.hue * heat, 1)}deg) ` +
         `brightness(${fix(1 + 0.8 * heat, 2)}) blur(${fix(0.8 * p, 2)}px); ` +
-        `text-shadow: 0 0 ${fix(2 + 6 * heat, 1)}px rgba(255,150,60,${fix(0.85 * heat, 2)})`
+        `text-shadow: 0 0 ${fix(2 + 6 * heat, 1)}px rgba(${pal.glow},${fix(0.85 * heat, 2)})`
     };
   }
 
@@ -314,7 +339,9 @@
 
   return {
     DRAIN, VARIANTS, STAGES, GONE, TYPE_COUNT, NORMAL, FLASH, TIMING, DURATION, VX_MAX, VY_MAX,
-    RADIUS_MIN, RADIUS_MAX, visualLength, holeRadius, pickHole, lineChunks, chunkState, holeSize, holeLevel, flashLevel,
+    RADIUS_MIN, RADIUS_MAX, LINE_IN_COLUMNS, DISK_ASPECT, THETA,
+    clamp, fix, smoothstep, translate,
+    visualLength, holeRadius, pickHole, lineChunks, chunkState, holeSize, holeLevel, flashLevel,
     vecXOptions, vecYOptions, stageOptions, diskOptions, shadowOptions, flashOptions
   };
 });

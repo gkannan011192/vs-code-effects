@@ -2,12 +2,12 @@
 
 A timed eye break for VS Code.
 
-After a set time of active work, the code in your editors falls into a black hole (default) or turns to dust.
+After a set time of active work, the code in your editors falls into a black hole (default), goes through a wormhole, blows away in a supernova, or turns to dust.
 The editor stays empty for a short rest. Then the animation plays backward and the code comes back.
 
 There is no key to push. The timer and the time filter start each break.
 
-Previews of the two effects: `media/preview-blackhole.gif` and `media/preview-dust.gif` in the [repository](https://github.com/gkannan011192/vs-code-effects).
+Previews of the effects: `media/preview-blackhole.gif`, `media/preview-wormhole.gif`, `media/preview-supernova.gif` and `media/preview-dust.gif` in the [repository](https://github.com/gkannan011192/vs-code-effects).
 
 ## Install
 
@@ -50,8 +50,8 @@ Outside the filter, the timer stops. It does not reset.
 
 | Setting | Default | Description |
 |---|---|---|
-| `blackHoleBreak.effect` | `blackHole` | `blackHole` or `dust`. |
-| `blackHoleBreak.holeScale` | `1` | Black hole size multiplier (0.5 to 3). The hole also grows with the editor height. |
+| `blackHoleBreak.effect` | `blackHole` | `blackHole`, `wormhole`, `supernova` or `dust`. |
+| `blackHoleBreak.holeScale` | `1` | Size multiplier for the hole (black hole, wormhole) and the star (supernova), 0.5 to 3. The size also grows with the editor height. |
 | `blackHoleBreak.enabled` | `true` | Timer on or off. |
 | `blackHoleBreak.intervalMinutes` | `10` | Active minutes between breaks. |
 | `blackHoleBreak.restSeconds` | `20` | Length of the empty-editor rest. |
@@ -135,9 +135,30 @@ The hole is two empty attachments (`content: ''`) with absolute position:
 
 Vector decorations change only when the visible window changes. Each frame changes only the stage decorations and the hole.
 
+## Wormhole
+
+- Two mouths: mouth A at about 1/3 of the visible height and 28% of the width, mouth B at about 2/3 of the height and 72% of the width. Each mouth is 0.85 times the size of a black hole.
+- Same spiral as the black hole, with a blue shift (`hue-rotate` to blue, blue glow) in place of the orange heat.
+- Mouth look: a round blue-violet swirl (conic gradient) and a dark throat with a light center (a view through to the other side) and a cyan photon ring.
+- When the rest starts, all code is gone. At that moment the grain vectors change from mouth A to mouth B. Reverse play then makes the code spiral out of mouth B. If you end a break before the code is gone, the code goes back out of mouth A.
+
+## Supernova
+
+| t (s) | Event |
+|---|---|
+| 0 - 0.75 | A star core grows at the hole position and pulses. The code near it is pulled in a little and heats up. |
+| 0.75 | Core collapse: flash, shockwave ring (grows to about 1.5 × the visible height). |
+| 0.75 - 3.6 | The shock front reaches each grain, nearest first. The grain flies outward to 6.5 × its distance, white-hot, then orange, then dark. |
+| 0.9 - 4.0 | A nebula grows and fades. A small neutron star pulses, then fades. |
+| 4.05 | Empty editor (rest). Reverse play: the code implodes back. |
+
+Grains near the core get a minimum push (14 columns), so they also fly. The timing still uses the true distance.
+
+Outward motion uses the same CSS as the spiral: `r = 1 + 5.5·p^1.3`, `theta = ±0.18 to 0.45·p`.
+
 ## Implementation notes
 
-- The look of each grain is a VS Code text decoration. Dust: 52 stage types. Black hole: 68 stage types, plus vector types (one for each column or line offset in use) and hole types (made for each break, then removed). Each frame only gives new ranges to the types that changed.
+- The look of each grain is a VS Code text decoration. Dust: 52 stage types. Black hole, wormhole, supernova: 68 stage types each, plus vector types (one for each column or line offset in use) and overlay types (made for each break, then removed). Each frame only gives new ranges to the types that changed.
 - VS Code copies the `textDecoration` value into the CSS rule without changes. The extension uses this to add `display: inline-block`, transforms, filters and custom properties. A transform does not change the layout, so the cursor and the line positions stay the same.
 - Needs VS Code 1.85 or later (CSS `lh` unit, individual `translate` / `rotate` / `scale` properties).
 - Only the visible lines (+6 lines) are split into grains. One range hides the lines off screen.
@@ -155,8 +176,9 @@ Vector decorations change only when the visible window changes. Each frame chang
 |---|---|
 | `extension.js` | Scheduler, break phases, status bar, commands |
 | `src/core.js` | Dust: pure logic (grains, look at time t, styles), schedule parser |
-| `src/blackhole.js` | Black hole: pure logic (vectors, spiral stages, hole size, styles) |
-| `src/blackhole-renderer.js` | Black hole decorations |
+| `src/blackhole.js` | Shared grain engine (vectors, timing, spiral stages) and the black hole look |
+| `src/cosmic.js` | Effect specs: black hole, wormhole, supernova (pure logic) |
+| `src/cosmic-renderer.js` | Decorations for any cosmic spec |
 | `src/timeline.js` | Animation clock |
 | `src/timer.js` | Active-time counter |
 | `src/renderer.js` | Dust decorations |

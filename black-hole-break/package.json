@@ -1,8 +1,8 @@
 {
   "name": "black-hole-break",
   "displayName": "Black-Hole Break",
-  "description": "Timed eye breaks: your code falls into a black hole, you rest your eyes, then the code spirals back out.",
-  "version": "0.3.2",
+  "description": "Timed eye breaks: your code falls into a black hole, goes through a wormhole, blows up in a supernova or turns to dust; you rest your eyes, then the code comes back.",
+  "version": "0.4.0",
   "publisher": "local-dev",
   "license": "MIT",
   "repository": {
@@ -22,7 +22,9 @@
     "eyes",
     "20-20-20",
     "focus",
-    "animation"
+    "animation",
+    "wormhole",
+    "supernova"
   ],
   "main": "./extension.js",
   "activationEvents": [
@@ -73,10 +75,14 @@
           "type": "string",
           "enum": [
             "blackHole",
+            "wormhole",
+            "supernova",
             "dust"
           ],
           "enumDescriptions": [
             "The code spirals into a black hole in the middle of the editor. The hole collapses with a flash. On restore, the code spirals back out.",
+            "The code spirals into a blue wormhole mouth. After the rest, it spirals out of a second mouth in another part of the editor.",
+            "A star core forms and pulls the code in, then explodes: a flash, a shockwave, and the code blows outward, white-hot. A nebula fades away. On restore, the code implodes back.",
             "The code turns grey, breaks into dust and blows away. On restore, the dust flies back."
           ],
           "default": "blackHole",
@@ -87,7 +93,7 @@
           "default": 1,
           "minimum": 0.5,
           "maximum": 3,
-          "markdownDescription": "Size of the black hole. The hole already grows with the editor height (about 11% of the visible height). This value multiplies that size: `1.5` = 50% larger, `0.75` = 25% smaller."
+          "markdownDescription": "Size of the hole (black hole and wormhole) and of the star (supernova). The size already grows with the editor height (about 11% of the visible height). This value multiplies that size: `1.5` = 50% larger, `0.75` = 25% smaller."
         },
         "blackHoleBreak.enabled": {
           "type": "boolean",

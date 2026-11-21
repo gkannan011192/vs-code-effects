@@ -18,7 +18,7 @@
 <body>
 <div id="ed"></div>
 <div id="ui">
-  <select id="effect"><option value="blackHole">Black hole</option><option value="dust">Dust</option></select>
+  <select id="effect"><option value="blackHole">Black hole</option><option value="wormhole">Wormhole</option><option value="supernova">Supernova</option><option value="dust">Dust</option></select>
   <button id="play" class="primary">Play break</button>
   <input id="scrub" type="range" min="0" max="5" step="0.001" value="0" aria-label="Timeline">
   <span id="t">t = 0.000</span>
@@ -27,6 +27,7 @@
 
 <script src="../black-hole-break/src/core.js"></script>
 <script src="../black-hole-break/src/blackhole.js"></script>
+<script src="../black-hole-break/src/cosmic.js"></script>
 <script src="node_modules/monaco-editor/min/vs/loader.js"></script>
 <script>
 /*
@@ -36,11 +37,11 @@
  * attachment -> `::before/::after { content:''; text-decoration:{0}; }`.
  * Each effect is a pure function of t, so the slider shows any moment.
  *
- * URL params: ?effect=blackHole|dust  &t=1.2  &ui=0 (hide controls)
+ * URL params: ?effect=blackHole|wormhole|supernova|dust  &t=1.2  &ui=0 (hide controls)
  */
 require.config({ paths: { vs: 'node_modules/monaco-editor/min/vs' } });
 require(['vs/editor/editor.main'], function () {
-  const D = DustCore, B = BlackHoleCore;
+  const D = DustCore, B = BlackHoleCore, C = CosmicCore;
   const params = new URLSearchParams(location.search);
 
   // ---------------------------------------------------------------- CSS classes
@@ -138,43 +139,49 @@ public final class StageRunner {
     return decs;
   }
 
-  // ---------------------------------------------------------------- black hole
-  const bhCache = new Map();
-  let hole = null;
-  function blackHoleDecorations(t, lo, hi) {
-    if (!hole) {
+  // ---------------------------------------------------------------- cosmic effects
+  // Same steps as src/cosmic-renderer.js: vectors (--bh-x/--bh-y), stage, overlays.
+  const cosmicState = new Map();   // effect -> { anchors, cache }
+  function cosmicDecorations(effect, t, lo, hi, returning) {
+    const spec = C.getSpec(effect);
+    let st = cosmicState.get(effect);
+    if (!st) {
       const texts = [];
       for (let l = lo; l <= hi; l++) texts.push(model.getLineContent(l + 1));
-      hole = B.pickHole(texts, lo, TAB);
+      st = { anchors: spec.anchors(texts, lo, TAB, 1), cache: new Map() };
+      cosmicState.set(effect, st);
     }
+    const idx = Math.min(spec.anchorIndex(returning), st.anchors.length - 1);
+    const anchor = st.anchors[idx];
     const decs = [];
     for (let line = lo; line <= hi; line++) {
-      let ch = bhCache.get(line);
-      if (!ch) { ch = B.lineChunks(model.getLineContent(line + 1), line, seed, TAB, hole); bhCache.set(line, ch); }
+      const key = idx + ':' + line;
+      let ch = st.cache.get(key);
+      if (!ch) { ch = B.lineChunks(model.getLineContent(line + 1), line, seed, TAB, anchor, spec.profile); st.cache.set(key, ch); }
       for (const c of ch) {
         const r = range(line, c.start, c.end);
         decs.push({ range: r, options: { inlineClassName: cls('x' + c.vx, B.vecXOptions(c.vx)) } });
         decs.push({ range: r, options: { inlineClassName: cls('y' + c.vy, B.vecYOptions(c.vy)) } });
         const s = B.chunkState(c, t);
-        if (s >= 0) decs.push({ range: r, options: { inlineClassName: cls('bh' + s, B.stageOptions(s, 0)) } });
+        if (s >= 0) decs.push({ range: r, options: { inlineClassName: cls(effect + '-s' + s, spec.stageOptions(s, 0)) } });
       }
     }
-    const h = B.holeLevel(t);
-    if (h) {
-      const r = new monaco.Range(hole.line + 1, 1, hole.line + 1, 1);
-      decs.push({ range: r, options: { beforeContentClassName: cls(`disk${hole.col}|${hole.radius}|${h.size}|${h.angle}`, B.diskOptions(hole.col, h.size, h.angle, hole.radius), 'before') } });
-      decs.push({ range: r, options: { afterContentClassName: cls(`hor${hole.col}|${hole.radius}|${h.size}`, B.shadowOptions(hole.col, h.size, hole.radius), 'after') } });
+    for (const o of spec.overlays(t, st.anchors, idx)) {
+      const r = new monaco.Range(o.line + 1, 1, o.line + 1, 1);
+      if (o.opts.before) decs.push({ range: r, options: { beforeContentClassName: cls(o.key, o.opts.before, 'before') } });
+      else decs.push({ range: r, options: { afterContentClassName: cls(o.key, o.opts.after, 'after') } });
     }
-    const fl = B.flashLevel(t);
-    if (fl >= 0) decs.push({ range: new monaco.Range(lo + 1, 1, hi + 1, 1), options: { isWholeLine: true, className: cls('bflash' + fl, B.flashOptions(fl)) } });
+    const fl = spec.flashLevel(t);
+    if (fl >= 0) decs.push({ range: new monaco.Range(lo + 1, 1, hi + 1, 1), options: { isWholeLine: true, className: cls(effect + '-f' + fl, spec.flashOptions(fl)) } });
     return decs;
   }
 
   // ---------------------------------------------------------------- render(t)
-  const durationOf = (effect) => (effect === 'dust' ? D.DURATION : B.DURATION);
-  function renderAt(effect, t, msg) {
+  const durationOf = (effect) => (effect === 'dust' ? D.DURATION : C.getSpec(effect).DURATION);
+  /** returning: true after the rest (wormhole: code comes out of mouth B). */
+  function renderAt(effect, t, msg, returning) {
     const { lo, hi } = windowLines();
-    const decs = effect === 'dust' ? dustDecorations(t, lo, hi) : blackHoleDecorations(t, lo, hi);
+    const decs = effect === 'dust' ? dustDecorations(t, lo, hi) : cosmicDecorations(effect, t, lo, hi, !!returning);
     if (msg) {
       const mid = Math.floor((lo + hi) / 2) + 1;
       decs.push({ range: new monaco.Range(mid, 1, mid, 1), options: { beforeContentClassName: msgClass(msg) } });
@@ -192,6 +199,7 @@ public final class StageRunner {
   const REST = 2;            // seconds of rest in the preview
   let t = Number(params.get('t') || 0);
   let phase = 'idle';        // idle | out | rest | in
+  let returning = false;     // set when the rest starts
   let restLeft = 0;
   let last = null;
 
@@ -200,7 +208,7 @@ public final class StageRunner {
     ui.scrub.max = durationOf(effect).toFixed(3);
     ui.scrub.value = t;
     ui.t.textContent = 't = ' + t.toFixed(3);
-    renderAt(effect, t, phase === 'rest' ? `Rest your eyes. Look at something far away.  0:0${Math.ceil(restLeft)}` : null);
+    renderAt(effect, t, phase === 'rest' ? `Rest your eyes. Look at something far away.  0:0${Math.ceil(restLeft)}` : null, returning);
   }
 
   function frame(now) {
@@ -209,16 +217,16 @@ public final class StageRunner {
     last = now;
     if (phase === 'idle') return;
     const dur = durationOf(ui.effect.value);
-    if (phase === 'out') { t = Math.min(dur, t + dt); if (t >= dur) { phase = 'rest'; restLeft = REST; } }
+    if (phase === 'out') { t = Math.min(dur, t + dt); if (t >= dur) { phase = 'rest'; restLeft = REST; returning = true; } }
     else if (phase === 'rest') { restLeft -= dt; if (restLeft <= 0) phase = 'in'; }
     else if (phase === 'in') { t = Math.max(0, t - dt); if (t <= 0) phase = 'idle'; }
     show();
     ui.play.textContent = phase === 'idle' ? 'Play break' : 'Stop';
   }
 
-  ui.play.onclick = () => { if (phase === 'idle') { t = 0; phase = 'out'; } else { phase = 'idle'; } show(); };
-  ui.scrub.oninput = () => { phase = 'idle'; t = Number(ui.scrub.value); show(); };
-  ui.effect.onchange = () => { phase = 'idle'; t = 0; show(); };
+  ui.play.onclick = () => { if (phase === 'idle') { t = 0; phase = 'out'; returning = false; } else { phase = 'idle'; } show(); };
+  ui.scrub.oninput = () => { phase = 'idle'; returning = false; t = Number(ui.scrub.value); show(); };
+  ui.effect.onchange = () => { phase = 'idle'; returning = false; t = 0; show(); };
 
   window.renderAt = renderAt;
   window.durationOf = durationOf;
