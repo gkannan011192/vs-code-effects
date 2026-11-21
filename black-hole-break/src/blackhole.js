@@ -93,13 +93,38 @@
     return col;
   }
 
-  /** Pick the hole: middle visible line, column at half of the widest visible line. */
-  function pickHole(lineTexts, firstLine, tabSize) {
+  /**
+   * Hole size follows the screen: the event-horizon radius (in lines) grows
+   * with the number of visible lines, so a tall editor gets a large hole.
+   *   radius = clamp(visibleLines * RADIUS_PER_LINE, RADIUS_MIN, RADIUS_MAX)
+   * e.g. 20 lines -> 1.2, 32 lines -> 1.8, 60 lines -> 3.3 (diameter 2x).
+   * `scale` (setting blackHoleBreak.holeScale) multiplies the result.
+   */
+  const RADIUS_PER_LINE = 0.055;
+  const RADIUS_MIN = 1.2;
+  const RADIUS_MAX = 6;
+  const LINE_IN_COLUMNS = 2.4;     // a line is about 2.4 columns tall
+  const DISK_ASPECT = 2.96;        // disk width / disk height
+
+  function holeRadius(visibleLines, scale = 1) {
+    const r = clamp(visibleLines * RADIUS_PER_LINE, RADIUS_MIN, RADIUS_MAX) * clamp(scale, 0.5, 3);
+    return Math.round(r * 10) / 10;
+  }
+
+  /**
+   * Pick the hole: middle visible line, column at half of the widest visible
+   * line, radius from the visible height. The column is kept far enough from
+   * the left edge for the whole disk to show.
+   */
+  function pickHole(lineTexts, firstLine, tabSize, scale = 1) {
     let maxLen = 0;
     for (const t of lineTexts) maxLen = Math.max(maxLen, visualLength(t, tabSize));
+    const radius = holeRadius(lineTexts.length, scale);
+    const minCol = Math.max(12, Math.ceil(radius * DISK_ASPECT * LINE_IN_COLUMNS));
     return {
       line: firstLine + Math.floor(lineTexts.length / 2),
-      col: clamp(Math.round(maxLen * 0.5), 12, 60)
+      col: clamp(Math.round(maxLen * 0.5), minCol, Math.max(minCol, 60)),
+      radius
     };
   }
 
@@ -129,7 +154,7 @@
         const len = Math.min(j - k, 1 + Math.floor(rand() * maxLen));
         const vcol = col + (k - i);
         const vx = clamp(Math.round(2 * (vcol + len / 2 - hole.col)), -VX_MAX, VX_MAX); // half-columns
-        const dist = Math.hypot(vx * 0.5, vy * 2.4);  // a line is ~2.4 columns tall
+        const dist = Math.hypot(vx * 0.5, vy * LINE_IN_COLUMNS);
         const dn = Math.min(1, dist / 70);
         const delay = TIMING.firstAt + TIMING.drainLead +
           TIMING.sweep * Math.pow(dn, 0.85) +
@@ -244,28 +269,33 @@
 
   const ABS = 'position: absolute; pointer-events: none; border-radius: 50%';
 
-  /** Accretion disk: tilted ring, conic gradient turned by angle level. */
-  function diskOptions(col, sizeLevel, angleLevel) {
+  /**
+   * Accretion disk: tilted ring, conic gradient turned by angle level.
+   * radius: event-horizon radius in lines (from pickHole).
+   */
+  function diskOptions(col, sizeLevel, angleLevel, radius = RADIUS_MIN) {
     const s = sizeLevel / 20;
     const a = angleLevel * 15;
+    const h = 2 * radius * s;              // disk height = horizon diameter
+    const w = DISK_ASPECT * h;
     return {
       contentText: '',
       textDecoration: `none; ${ABS}; z-index: 6; ` +
-        `left: calc(${col}ch - ${fix(3.4 * s)}lh); top: calc(0.5lh - ${fix(1.15 * s)}lh); ` +
-        `width: ${fix(6.8 * s)}lh; height: ${fix(2.3 * s)}lh; ` +
+        `left: calc(${col}ch - ${fix(w / 2)}lh); top: calc(0.5lh - ${fix(h / 2)}lh); ` +
+        `width: ${fix(w)}lh; height: ${fix(h)}lh; ` +
         `background: conic-gradient(from ${a}deg, rgba(255,110,40,0) 0deg, rgba(255,170,80,0.9) 50deg, ` +
         `rgba(255,240,205,1) 85deg, rgba(255,140,60,0.7) 140deg, rgba(255,110,40,0.05) 210deg, ` +
         `rgba(255,170,90,0.55) 290deg, rgba(255,110,40,0) 360deg); ` +
         `-webkit-mask: radial-gradient(closest-side, transparent 0 30%, #000 44% 66%, transparent 100%); ` +
         `mask: radial-gradient(closest-side, transparent 0 30%, #000 44% 66%, transparent 100%); ` +
-        `filter: blur(${fix(0.05 * s)}lh) saturate(1.2)`
+        `filter: blur(${fix(0.045 * h)}lh) saturate(1.2)`
     };
   }
 
   /** Event horizon: black disk with a bright photon ring and a warm glow. */
-  function shadowOptions(col, sizeLevel) {
+  function shadowOptions(col, sizeLevel, radius = RADIUS_MIN) {
     const s = sizeLevel / 20;
-    const d = 2.3 * s;
+    const d = 2 * radius * s;
     return {
       contentText: '',
       textDecoration: `none; ${ABS}; z-index: 7; ` +
@@ -273,7 +303,7 @@
         `width: ${fix(d)}lh; height: ${fix(d)}lh; ` +
         `background: radial-gradient(circle, #000 0 56%, #060302 61%, rgba(255,226,180,0.95) 65%, ` +
         `rgba(255,150,60,0.55) 71%, rgba(255,110,40,0) 80%); ` +
-        `box-shadow: 0 0 ${fix(0.9 * s)}lh ${fix(0.12 * s)}lh rgba(255,140,60,0.3)`
+        `box-shadow: 0 0 ${fix(0.4 * d)}lh ${fix(0.05 * d)}lh rgba(255,140,60,0.3)`
     };
   }
 
@@ -284,7 +314,7 @@
 
   return {
     DRAIN, VARIANTS, STAGES, GONE, TYPE_COUNT, NORMAL, FLASH, TIMING, DURATION, VX_MAX, VY_MAX,
-    visualLength, pickHole, lineChunks, chunkState, holeSize, holeLevel, flashLevel,
+    RADIUS_MIN, RADIUS_MAX, visualLength, holeRadius, pickHole, lineChunks, chunkState, holeSize, holeLevel, flashLevel,
     vecXOptions, vecYOptions, stageOptions, diskOptions, shadowOptions, flashOptions
   };
 });

@@ -162,8 +162,8 @@ public final class StageRunner {
     const h = B.holeLevel(t);
     if (h) {
       const r = new monaco.Range(hole.line + 1, 1, hole.line + 1, 1);
-      decs.push({ range: r, options: { beforeContentClassName: cls(`disk${hole.col}|${h.size}|${h.angle}`, B.diskOptions(hole.col, h.size, h.angle), 'before') } });
-      decs.push({ range: r, options: { afterContentClassName: cls(`hor${hole.col}|${h.size}`, B.shadowOptions(hole.col, h.size), 'after') } });
+      decs.push({ range: r, options: { beforeContentClassName: cls(`disk${hole.col}|${hole.radius}|${h.size}|${h.angle}`, B.diskOptions(hole.col, h.size, h.angle, hole.radius), 'before') } });
+      decs.push({ range: r, options: { afterContentClassName: cls(`hor${hole.col}|${hole.radius}|${h.size}`, B.shadowOptions(hole.col, h.size, hole.radius), 'after') } });
     }
     const fl = B.flashLevel(t);
     if (fl >= 0) decs.push({ range: new monaco.Range(lo + 1, 1, hi + 1, 1), options: { isWholeLine: true, className: cls('bflash' + fl, B.flashOptions(fl)) } });

@@ -57,3 +57,28 @@ test('styles: every stage type is valid, vectors use ch and lh', () => {
   assert.strictEqual(bh.diskOptions(30, 20, 3).contentText, '');
   assert.match(bh.shadowOptions(30, 20).textDecoration, /left: calc\(30ch/);
 });
+
+test('hole size follows the visible height of the editor', () => {
+  const small = bh.pickHole(Array(20).fill('x'.repeat(80)), 0, 4);
+  const big = bh.pickHole(Array(60).fill('x'.repeat(80)), 0, 4);
+  const huge = bh.pickHole(Array(500).fill('x'.repeat(80)), 0, 4);
+  assert.strictEqual(small.radius, bh.RADIUS_MIN);
+  assert.ok(big.radius > 2.5 * small.radius);
+  assert.strictEqual(huge.radius, bh.RADIUS_MAX);
+  const width = (o) => Number(o.textDecoration.match(/width: ([\d.]+)lh/)[1]);
+  assert.ok(width(bh.shadowOptions(30, 20, big.radius)) > width(bh.shadowOptions(30, 20, small.radius)));
+  assert.ok(width(bh.diskOptions(30, 20, 0, big.radius)) > width(bh.diskOptions(30, 20, 0, small.radius)));
+  // the hole column keeps the whole disk inside the left edge (1 line ~ 2.4 columns)
+  for (const h of [small, big, huge]) {
+    const m = bh.diskOptions(h.col, 20, 0, h.radius).textDecoration.match(/left: calc\((\d+)ch - ([\d.]+)lh\)/);
+    assert.ok(Number(m[1]) >= Number(m[2]) * 2.4 - 0.01, `col ${m[1]} vs half-width ${m[2]}lh`);
+  }
+});
+
+test('holeScale multiplies the hole size', () => {
+  const lines = Array(40).fill('x'.repeat(80));
+  const base = bh.pickHole(lines, 0, 4, 1).radius;
+  assert.ok(Math.abs(bh.pickHole(lines, 0, 4, 2).radius - 2 * base) <= 0.1);
+  assert.ok(bh.pickHole(lines, 0, 4, 0.5).radius < base);
+  assert.strictEqual(bh.pickHole(lines, 0, 4, 99).radius, Math.round(base * 3 * 10) / 10); // clamped to 3x
+});

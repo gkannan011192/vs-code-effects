@@ -43,6 +43,7 @@ function readConfig() {
     speed: Math.min(4, Math.max(0.1, c.get('animationSpeed', 1))),
     fps: Math.min(60, Math.max(10, c.get('fps', 30))),
     flash: c.get('flash', true),
+    holeScale: Math.min(3, Math.max(0.5, c.get('holeScale', 1))),
     effect: c.get('effect', 'blackHole') === 'dust' ? 'dust' : 'blackHole'
   };
 }
@@ -149,7 +150,7 @@ class DustBreak {
     }
     if (this.renderer && this.renderer.kind !== this.cfg.effect) { this.renderer.dispose(); this.renderer = null; }
     if (!this.renderer) {
-      const opts = { ghostOpacity: this.cfg.ghostOpacity, flash: this.cfg.flash };
+      const opts = { ghostOpacity: this.cfg.ghostOpacity, flash: this.cfg.flash, holeScale: this.cfg.holeScale };
       this.renderer = this.cfg.effect === 'dust' ? new DustRenderer(opts) : new BlackHoleRenderer(opts);
     }
     const timeline = new Timeline(this.renderer.duration);

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Black hole size follows the screen: the radius grows with the number of visible lines (about 11% of the visible height, 1.2 to 6 lines). A taller editor gets a larger hole.
+- New setting `blackHoleBreak.holeScale` (0.5 to 3) to make the hole larger or smaller.
+- The hole column moves right when necessary, so the whole disk shows.
+
 ## 0.3.1
 
 - Default time filter removed: breaks run all day, every day. Set `blackHoleBreak.activeHours` to limit them.

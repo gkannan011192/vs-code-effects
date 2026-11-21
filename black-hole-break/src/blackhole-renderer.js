@@ -27,7 +27,7 @@ function hashRanges(list) {
 }
 
 class BlackHoleRenderer {
-  /** @param {{ghostOpacity: number, flash: boolean}} opts */
+  /** @param {{ghostOpacity: number, flash: boolean, holeScale?: number}} opts */
   constructor(opts) {
     this.kind = 'blackHole';
     this.opts = opts;
@@ -120,7 +120,7 @@ class BlackHoleRenderer {
     if (!entry.hole) {
       const texts = [];
       for (let l = first; l <= Math.min(end, last); l++) texts.push(doc.lineAt(l).text);
-      entry.hole = bh.pickHole(texts, first, tab);
+      entry.hole = bh.pickHole(texts, first, tab, this.opts.holeScale || 1);
       entry.hole.line = Math.min(entry.hole.line, last);
     }
     const hole = entry.hole;
@@ -187,8 +187,8 @@ class BlackHoleRenderer {
       entry.holeSet = [];
       if (lvl) {
         const at = [new vscode.Range(hole.line, 0, hole.line, 0)];
-        const disk = this._holeType(`d${hole.col}|${holeKey}`, () => ({ before: bh.diskOptions(hole.col, lvl.size, lvl.angle) }));
-        const shadow = this._holeType(`s${hole.col}|${lvl.size}`, () => ({ after: bh.shadowOptions(hole.col, lvl.size) }));
+        const disk = this._holeType(`d${hole.col}|${hole.radius}|${holeKey}`, () => ({ before: bh.diskOptions(hole.col, lvl.size, lvl.angle, hole.radius) }));
+        const shadow = this._holeType(`s${hole.col}|${hole.radius}|${lvl.size}`, () => ({ after: bh.shadowOptions(hole.col, lvl.size, hole.radius) }));
         ed.setDecorations(disk, at);
         ed.setDecorations(shadow, at);
         entry.holeSet = [disk, shadow];

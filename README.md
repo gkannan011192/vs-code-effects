@@ -92,6 +92,7 @@ To change them, open **Settings** (`Cmd+,`) and search for `blackHoleBreak`, or 
 ```jsonc
 {
   "blackHoleBreak.effect": "blackHole",          // or "dust"
+  "blackHoleBreak.holeScale": 1,                 // black hole size x (0.5-3); it also grows with the editor height
   "blackHoleBreak.intervalMinutes": 10,          // active minutes between breaks
   "blackHoleBreak.restSeconds": 20,              // length of the empty-editor rest
   "blackHoleBreak.activeHours": "",              // e.g. "09:00-12:30, 13:30-18:00"; empty = all day

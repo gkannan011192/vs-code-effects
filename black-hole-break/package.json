@@ -2,7 +2,7 @@
   "name": "black-hole-break",
   "displayName": "Black-Hole Break",
   "description": "Timed eye breaks: your code falls into a black hole, you rest your eyes, then the code spirals back out.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "local-dev",
   "license": "MIT",
   "repository": {
@@ -81,6 +81,13 @@
           ],
           "default": "blackHole",
           "description": "Animation for the break."
+        },
+        "blackHoleBreak.holeScale": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0.5,
+          "maximum": 3,
+          "markdownDescription": "Size of the black hole. The hole already grows with the editor height (about 11% of the visible height). This value multiplies that size: `1.5` = 50% larger, `0.75` = 25% smaller."
         },
         "blackHoleBreak.enabled": {
           "type": "boolean",

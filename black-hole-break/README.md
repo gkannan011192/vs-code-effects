@@ -51,6 +51,7 @@ Outside the filter, the timer stops. It does not reset.
 | Setting | Default | Description |
 |---|---|---|
 | `blackHoleBreak.effect` | `blackHole` | `blackHole` or `dust`. |
+| `blackHoleBreak.holeScale` | `1` | Black hole size multiplier (0.5 to 3). The hole also grows with the editor height. |
 | `blackHoleBreak.enabled` | `true` | Timer on or off. |
 | `blackHoleBreak.intervalMinutes` | `10` | Active minutes between breaks. |
 | `blackHoleBreak.restSeconds` | `20` | Length of the empty-editor rest. |
@@ -110,6 +111,7 @@ No state is kept from frame to frame. Thus reverse play is exact, and a low fram
 ## Black hole geometry
 
 The hole is at the middle visible line, at half the width of the widest visible line.
+Its size follows the screen: the event-horizon radius is `0.055 × visible lines` (1.2 to 6 lines), times `holeScale`. For example, 32 visible lines give a hole 3.6 lines across; 60 lines give 6.6. The disk is 2.96 times as wide as the hole.
 Each grain gets its vector `v` from the hole as two CSS custom properties.
 These come from two decorations on the same text range:
 
