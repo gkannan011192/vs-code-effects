@@ -1,0 +1,14 @@
+{
+  "name": "vs-code-effects-preview",
+  "private": true,
+  "description": "Browser preview and GIF recorder for the VS Code effects (Monaco editor, same decoration CSS as VS Code).",
+  "scripts": {
+    "serve": "npx --yes http-server -c-1 -o /preview/index.html ..",
+    "record:blackhole": "node record.mjs blackHole ../black-hole-break/media/preview-blackhole.gif",
+    "record:dust": "node record.mjs dust ../black-hole-break/media/preview-dust.gif"
+  },
+  "devDependencies": {
+    "monaco-editor": "0.52.0",
+    "playwright-core": "^1.48.0"
+  }
+}

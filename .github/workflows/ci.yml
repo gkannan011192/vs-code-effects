@@ -1,0 +1,23 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  black-hole-break:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: black-hole-break
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Unit and integration tests (fake vscode module)
+        run: npm test
+      - name: Check that the extension packages
+        run: npx --yes @vscode/vsce package

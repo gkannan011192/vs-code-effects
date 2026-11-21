@@ -1,0 +1,189 @@
+{
+  "name": "black-hole-break",
+  "displayName": "Black-Hole Break",
+  "description": "Timed eye breaks: your code falls into a black hole, you rest your eyes, then the code spirals back out.",
+  "version": "0.3.1",
+  "publisher": "local-dev",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gkannan011192/vs-code-effects.git",
+    "directory": "black-hole-break"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "break",
+    "black hole",
+    "eyes",
+    "20-20-20",
+    "focus",
+    "animation"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "blackHoleBreak.breakNow",
+        "title": "Take a Break Now",
+        "category": "Black-Hole Break"
+      },
+      {
+        "command": "blackHoleBreak.endBreak",
+        "title": "End Break",
+        "category": "Black-Hole Break"
+      },
+      {
+        "command": "blackHoleBreak.resetTimer",
+        "title": "Reset Timer",
+        "category": "Black-Hole Break"
+      },
+      {
+        "command": "blackHoleBreak.pause",
+        "title": "Pause for 1 Hour",
+        "category": "Black-Hole Break"
+      },
+      {
+        "command": "blackHoleBreak.resume",
+        "title": "Resume",
+        "category": "Black-Hole Break"
+      },
+      {
+        "command": "blackHoleBreak.toggle",
+        "title": "Enable / Disable",
+        "category": "Black-Hole Break"
+      },
+      {
+        "command": "blackHoleBreak.menu",
+        "title": "Show Menu",
+        "category": "Black-Hole Break"
+      }
+    ],
+    "configuration": {
+      "title": "Black-Hole Break",
+      "properties": {
+        "blackHoleBreak.effect": {
+          "type": "string",
+          "enum": [
+            "blackHole",
+            "dust"
+          ],
+          "enumDescriptions": [
+            "The code spirals into a black hole in the middle of the editor. The hole collapses with a flash. On restore, the code spirals back out.",
+            "The code turns grey, breaks into dust and blows away. On restore, the dust flies back."
+          ],
+          "default": "blackHole",
+          "description": "Animation for the break."
+        },
+        "blackHoleBreak.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Start eye breaks on the timer."
+        },
+        "blackHoleBreak.intervalMinutes": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "description": "Active minutes between breaks. Active = VS Code window focused, inside the schedule."
+        },
+        "blackHoleBreak.restSeconds": {
+          "type": "number",
+          "default": 20,
+          "minimum": 3,
+          "description": "How long the editor stays empty."
+        },
+        "blackHoleBreak.activeHours": {
+          "type": "string",
+          "default": "",
+          "pattern": "^$|^\\s*\\d{1,2}:\\d{2}\\s*-\\s*\\d{1,2}:\\d{2}\\s*(,\\s*\\d{1,2}:\\d{2}\\s*-\\s*\\d{1,2}:\\d{2}\\s*)*$",
+          "markdownDescription": "Time filter. Breaks only happen inside these local-time ranges, e.g. `09:00-12:30, 13:30-18:00`. Overnight ranges such as `22:00-02:00` are allowed. Empty = all day."
+        },
+        "blackHoleBreak.activeDays": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "Sun",
+              "Mon",
+              "Tue",
+              "Wed",
+              "Thu",
+              "Fri",
+              "Sat"
+            ]
+          },
+          "uniqueItems": true,
+          "default": [
+            "Sun",
+            "Mon",
+            "Tue",
+            "Wed",
+            "Thu",
+            "Fri",
+            "Sat"
+          ],
+          "description": "Day filter. Breaks only happen on these days."
+        },
+        "blackHoleBreak.waitForIdleSeconds": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "description": "When a break is due, wait until you stop typing for this many seconds."
+        },
+        "blackHoleBreak.resetAfterAwaySeconds": {
+          "type": "number",
+          "default": 300,
+          "minimum": 10,
+          "description": "Time away from the VS Code window that counts as a break and resets the timer."
+        },
+        "blackHoleBreak.endOnActivity": {
+          "type": "boolean",
+          "default": true,
+          "description": "Typing or clicking in the editor ends the break early (the code reassembles)."
+        },
+        "blackHoleBreak.message": {
+          "type": "string",
+          "default": "Rest your eyes. Look at something far away.",
+          "description": "Text shown in the empty editor during the rest. Empty = no text."
+        },
+        "blackHoleBreak.ghostOpacity": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 0.5,
+          "description": "Opacity of the hidden code during the rest. 0 = fully empty editor."
+        },
+        "blackHoleBreak.animationSpeed": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0.1,
+          "maximum": 4,
+          "description": "Animation speed (1 = about 5 s each way for the black hole, 3.6 s for dust)."
+        },
+        "blackHoleBreak.fps": {
+          "type": "number",
+          "default": 30,
+          "minimum": 10,
+          "maximum": 60,
+          "description": "Frame rate of the animation. Lower values use less CPU. The duration stays the same."
+        },
+        "blackHoleBreak.flash": {
+          "type": "boolean",
+          "default": true,
+          "description": "Short warm flash when the break starts."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test",
+    "package": "npx --yes @vscode/vsce package"
+  }
+}

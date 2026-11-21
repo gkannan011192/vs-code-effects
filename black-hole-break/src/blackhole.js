@@ -1,0 +1,290 @@
+/*
+ * Black hole effect: pure core (no `vscode` import). Shared by the extension,
+ * the unit tests and the browser preview.
+ *
+ * Geometry
+ * --------
+ * The hole sits at (hole.col, hole.line). Each chunk of code (1-3 characters)
+ * gets its vector from the hole as two CSS custom properties, from two
+ * stacked decorations on the same range:
+ *     --bh-x: <columns * 1ch>      --bh-y: <lines * 1lh>
+ * A stage decoration then moves the chunk along a spiral into the hole:
+ *     new = r(p) * Rot(theta(p)) * v      offset = new - v
+ *     offset.x = A*vx - B*vy,  offset.y = B*vx + A*vy
+ *     A = r cos(theta) - 1,    B = r sin(theta)
+ * `ch` and `lh` make it exact for any font size and line height.
+ *
+ * Time model
+ * ----------
+ * Everything is a pure function of t in [0, DURATION]:
+ *   hole grows -> chunks redshift, then spiral in (nearest first) ->
+ *   hole collapses -> flash. Reverse play is a white hole: code spirals out.
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.BlackHoleCore = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  const DRAIN = 3;          // redshift levels before the fall
+  const VARIANTS = 4;       // orbit variants (how many turns)
+  const STAGES = 16;        // fall stages per variant
+  const GONE = DRAIN + VARIANTS * STAGES;
+  const TYPE_COUNT = GONE + 1;
+  const NORMAL = -1;
+  const FLASH = 4;
+
+  const VX_MAX = 400;       // half-columns
+  const VY_MAX = 150;       // lines
+
+  const TIMING = {
+    growEnd: 0.5,           // hole reaches full size
+    firstAt: 0.35,          // first chunk starts to redshift
+    drainLead: 0.3,
+    sweep: 1.7,             // nearest chunks fall first, farthest last
+    noise: 0.25,
+    jitter: 0.12,
+    lifeMin: 0.9,           // time to spiral in
+    lifeMax: 1.6,
+    collapseStart: 4.25,
+    collapseEnd: 4.7,
+    flashTime: 0.3
+  };
+  const DURATION = TIMING.collapseEnd + TIMING.flashTime;
+
+  const THETA = [3.6, 4.6, 5.6, 6.6];   // total orbit angle per variant (rad)
+
+  // ------------------------------------------------------------- random
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function hash2(ix, iy, seed) {
+    let h = Math.imul(ix | 0, 374761393) ^ Math.imul(iy | 0, 668265263) ^ Math.imul(seed | 0, 1442695041);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  }
+  const smooth01 = (x) => { const c = Math.min(1, Math.max(0, x)); return c * c * (3 - 2 * c); };
+  const smoothstep = (a, b, x) => smooth01((x - a) / (b - a));
+  function valueNoise(x, y, seed) {
+    const ix = Math.floor(x), iy = Math.floor(y);
+    const fx = smooth01(x - ix), fy = smooth01(y - iy);
+    const a = hash2(ix, iy, seed), b = hash2(ix + 1, iy, seed);
+    const c = hash2(ix, iy + 1, seed), d = hash2(ix + 1, iy + 1, seed);
+    const top = a + (b - a) * fx;
+    return top + ((c + (d - c) * fx) - top) * fy;
+  }
+
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const fix = (v, d = 3) => Number(v.toFixed(d));
+
+  // ------------------------------------------------------------- layout
+  /** Visual length of a line (tabs expanded). */
+  function visualLength(text, tabSize) {
+    let col = 0;
+    for (let i = 0; i < text.length; i++) col = text[i] === '\t' ? col + tabSize - (col % tabSize) : col + 1;
+    return col;
+  }
+
+  /** Pick the hole: middle visible line, column at half of the widest visible line. */
+  function pickHole(lineTexts, firstLine, tabSize) {
+    let maxLen = 0;
+    for (const t of lineTexts) maxLen = Math.max(maxLen, visualLength(t, tabSize));
+    return {
+      line: firstLine + Math.floor(lineTexts.length / 2),
+      col: clamp(Math.round(maxLen * 0.5), 12, 60)
+    };
+  }
+
+  /**
+   * Chunks of one line with their vector to the hole and their timing.
+   * Deterministic for (text, line, seed, hole).
+   */
+  function lineChunks(text, line, seed, tabSize, hole) {
+    const out = [];
+    const rand = mulberry32(Math.floor(hash2(line, 11, seed) * 4294967296));
+    const n = text.length;
+    const maxLen = n > 600 ? Math.ceil(n / 200) : 3;
+    const vy = clamp(line - hole.line, -VY_MAX, VY_MAX);
+    let col = 0; // visual column
+    let i = 0;
+    while (i < n) {
+      const ch = text[i];
+      if (ch === ' ' || ch === '\t') {
+        col = ch === '\t' ? col + tabSize - (col % tabSize) : col + 1;
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j < n && text[j] !== ' ' && text[j] !== '\t') j++;
+      let k = i;
+      while (k < j) {
+        const len = Math.min(j - k, 1 + Math.floor(rand() * maxLen));
+        const vcol = col + (k - i);
+        const vx = clamp(Math.round(2 * (vcol + len / 2 - hole.col)), -VX_MAX, VX_MAX); // half-columns
+        const dist = Math.hypot(vx * 0.5, vy * 2.4);  // a line is ~2.4 columns tall
+        const dn = Math.min(1, dist / 70);
+        const delay = TIMING.firstAt + TIMING.drainLead +
+          TIMING.sweep * Math.pow(dn, 0.85) +
+          TIMING.noise * (valueNoise(vcol * 0.08, line * 0.25, seed) - 0.5) +
+          TIMING.jitter * rand();
+        out.push({
+          start: k,
+          end: k + len,
+          vx,
+          vy,
+          delay: Math.max(TIMING.firstAt + TIMING.drainLead, delay),
+          life: TIMING.lifeMin + (TIMING.lifeMax - TIMING.lifeMin) * rand(),
+          variant: Math.floor(rand() * VARIANTS)
+        });
+        k += len;
+      }
+      col += j - i;
+      i = j;
+    }
+    return out;
+  }
+
+  // ------------------------------------------------------------- state(t)
+  function chunkState(c, t) {
+    if (t >= c.delay + c.life) return GONE;
+    if (t >= c.delay) {
+      const p = (t - c.delay) / c.life;
+      return DRAIN + c.variant * STAGES + Math.min(STAGES - 1, Math.floor(p * STAGES));
+    }
+    const d0 = c.delay - TIMING.drainLead;
+    if (t >= d0) return Math.min(DRAIN - 1, Math.floor(((t - d0) / TIMING.drainLead) * DRAIN));
+    return NORMAL;
+  }
+
+  /** Hole size factor at time t (0 = no hole). */
+  function holeSize(t) {
+    if (t <= 0 || t >= TIMING.collapseEnd) return 0;
+    let s;
+    if (t < TIMING.growEnd) {
+      const x = t / TIMING.growEnd;          // ease-out-back: slight overshoot
+      const c1 = 1.7, c3 = c1 + 1;
+      s = 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+    } else {
+      s = 1;
+    }
+    s *= 1 + 0.25 * smoothstep(TIMING.growEnd, TIMING.collapseStart, t);   // it feeds and grows
+    if (t > TIMING.collapseStart) {
+      const x = (t - TIMING.collapseStart) / (TIMING.collapseEnd - TIMING.collapseStart);
+      s *= 1 - x * x * x;
+    }
+    return Math.max(0, s);
+  }
+
+  /** Quantised hole state: { size, angle } levels, or null. */
+  function holeLevel(t) {
+    const s = holeSize(t);
+    if (s < 0.025) return null;
+    return {
+      size: Math.round(s * 20),                         // 0.05 steps
+      angle: Math.round(((t * 150) % 360) / 15) % 24    // disk turns 150 deg/s
+    };
+  }
+
+  function flashLevel(t) {
+    const s = t - TIMING.collapseEnd;
+    if (s <= 0 || s > TIMING.flashTime) return -1;
+    return Math.min(FLASH - 1, Math.floor((s / TIMING.flashTime) * FLASH));
+  }
+
+  // ------------------------------------------------------------- styles
+  const lenX = (n) => `${fix(n * 0.5, 1)}ch`;
+
+  /** Inline decoration that sets the x part of the vector (half-columns). */
+  function vecXOptions(vx) { return { textDecoration: `none; --bh-x: ${lenX(vx)}` }; }
+  /** Inline decoration that sets the y part of the vector (lines). */
+  function vecYOptions(vy) { return { textDecoration: `none; --bh-y: ${vy}lh` }; }
+
+  function translate(A, B) {
+    return `translate: calc(${fix(A)} * var(--bh-x, 0px) - ${fix(B)} * var(--bh-y, 0px)) ` +
+      `calc(${fix(B)} * var(--bh-x, 0px) + ${fix(A)} * var(--bh-y, 0px))`;
+  }
+
+  function stageOptions(i, ghostOpacity) {
+    if (i < DRAIN) {
+      const g = (i + 1) / DRAIN;
+      return {
+        textDecoration: `none; display: inline-block; ${translate(-0.04 * g, 0)}; ` +
+          `filter: sepia(${fix(0.5 * g, 2)}) saturate(${fix(1 + 0.6 * g, 2)}) brightness(${fix(1 - 0.2 * g, 2)})`
+      };
+    }
+    if (i === GONE) return { opacity: String(ghostOpacity), textDecoration: 'none' };
+
+    const v = Math.floor((i - DRAIN) / STAGES);
+    const k = (i - DRAIN) % STAGES;
+    const p = (k + 0.5) / STAGES;
+    const r = Math.pow(1 - p, 1.5);
+    const theta = THETA[v] * Math.pow(p, 1.7);
+    const A = r * Math.cos(theta) - 1;
+    const B = r * Math.sin(theta);
+    const heat = smoothstep(0.15, 0.75, p);
+    const scale = Math.max(0.04, Math.pow(1 - p, 0.8));
+    const opacity = p < 0.8 ? 1 : Math.max(0, (1 - p) / 0.2);
+    return {
+      opacity: String(fix(Math.max(opacity, ghostOpacity), 3)),
+      textDecoration: `none; display: inline-block; ${translate(A, B)}; ` +
+        `rotate: ${fix((theta * 180) / Math.PI, 1)}deg; scale: ${fix(scale)}; ` +
+        `filter: sepia(${fix(heat, 2)}) saturate(${fix(1 + 3 * heat, 2)}) hue-rotate(${fix(-25 * heat, 1)}deg) ` +
+        `brightness(${fix(1 + 0.8 * heat, 2)}) blur(${fix(0.8 * p, 2)}px); ` +
+        `text-shadow: 0 0 ${fix(2 + 6 * heat, 1)}px rgba(255,150,60,${fix(0.85 * heat, 2)})`
+    };
+  }
+
+  const ABS = 'position: absolute; pointer-events: none; border-radius: 50%';
+
+  /** Accretion disk: tilted ring, conic gradient turned by angle level. */
+  function diskOptions(col, sizeLevel, angleLevel) {
+    const s = sizeLevel / 20;
+    const a = angleLevel * 15;
+    return {
+      contentText: '',
+      textDecoration: `none; ${ABS}; z-index: 6; ` +
+        `left: calc(${col}ch - ${fix(3.4 * s)}lh); top: calc(0.5lh - ${fix(1.15 * s)}lh); ` +
+        `width: ${fix(6.8 * s)}lh; height: ${fix(2.3 * s)}lh; ` +
+        `background: conic-gradient(from ${a}deg, rgba(255,110,40,0) 0deg, rgba(255,170,80,0.9) 50deg, ` +
+        `rgba(255,240,205,1) 85deg, rgba(255,140,60,0.7) 140deg, rgba(255,110,40,0.05) 210deg, ` +
+        `rgba(255,170,90,0.55) 290deg, rgba(255,110,40,0) 360deg); ` +
+        `-webkit-mask: radial-gradient(closest-side, transparent 0 30%, #000 44% 66%, transparent 100%); ` +
+        `mask: radial-gradient(closest-side, transparent 0 30%, #000 44% 66%, transparent 100%); ` +
+        `filter: blur(${fix(0.05 * s)}lh) saturate(1.2)`
+    };
+  }
+
+  /** Event horizon: black disk with a bright photon ring and a warm glow. */
+  function shadowOptions(col, sizeLevel) {
+    const s = sizeLevel / 20;
+    const d = 2.3 * s;
+    return {
+      contentText: '',
+      textDecoration: `none; ${ABS}; z-index: 7; ` +
+        `left: calc(${col}ch - ${fix(d / 2)}lh); top: calc(0.5lh - ${fix(d / 2)}lh); ` +
+        `width: ${fix(d)}lh; height: ${fix(d)}lh; ` +
+        `background: radial-gradient(circle, #000 0 56%, #060302 61%, rgba(255,226,180,0.95) 65%, ` +
+        `rgba(255,150,60,0.55) 71%, rgba(255,110,40,0) 80%); ` +
+        `box-shadow: 0 0 ${fix(0.9 * s)}lh ${fix(0.12 * s)}lh rgba(255,140,60,0.3)`
+    };
+  }
+
+  const FLASH_ALPHA = [0.14, 0.09, 0.05, 0.02];
+  function flashOptions(level) {
+    return { isWholeLine: true, backgroundColor: `rgba(255, 200, 140, ${FLASH_ALPHA[level]})` };
+  }
+
+  return {
+    DRAIN, VARIANTS, STAGES, GONE, TYPE_COUNT, NORMAL, FLASH, TIMING, DURATION, VX_MAX, VY_MAX,
+    visualLength, pickHole, lineChunks, chunkState, holeSize, holeLevel, flashLevel,
+    vecXOptions, vecYOptions, stageOptions, diskOptions, shadowOptions, flashOptions
+  };
+});

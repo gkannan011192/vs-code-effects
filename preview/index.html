@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VS Code effects · preview</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1e1e1e; overflow: hidden; font: 13px/1.4 system-ui, -apple-system, sans-serif; color: #ddd; }
+  #ed { position: absolute; inset: 0; }
+  #ui { position: fixed; right: 16px; bottom: 16px; z-index: 50; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+        background: rgba(20, 22, 28, 0.88); border: 1px solid #333; border-radius: 10px; padding: 8px 10px; }
+  #ui button, #ui select { font: inherit; color: #eee; background: #2b2f3a; border: 1px solid #3a3f4c; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  #ui button.primary { background: #ffcf8a; color: #1a1206; border-color: transparent; font-weight: 600; }
+  #ui input[type=range] { width: 220px; accent-color: #ffcf8a; }
+  #t { font: 12px ui-monospace, Menlo, monospace; min-width: 9ch; color: #aaa; }
+</style>
+</head>
+<body>
+<div id="ed"></div>
+<div id="ui">
+  <select id="effect"><option value="blackHole">Black hole</option><option value="dust">Dust</option></select>
+  <button id="play" class="primary">Play break</button>
+  <input id="scrub" type="range" min="0" max="5" step="0.001" value="0" aria-label="Timeline">
+  <span id="t">t = 0.000</span>
+  <select id="speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+</div>
+
+<script src="../black-hole-break/src/core.js"></script>
+<script src="../black-hole-break/src/blackhole.js"></script>
+<script src="node_modules/monaco-editor/min/vs/loader.js"></script>
+<script>
+/*
+ * Preview of the effects in a Monaco editor (the editor inside VS Code).
+ * The CSS for each decoration is built the way VS Code builds it from the
+ * decoration options: inline -> `text-decoration:{0};opacity:{0};`,
+ * attachment -> `::before/::after { content:''; text-decoration:{0}; }`.
+ * Each effect is a pure function of t, so the slider shows any moment.
+ *
+ * URL params: ?effect=blackHole|dust  &t=1.2  &ui=0 (hide controls)
+ */
+require.config({ paths: { vs: 'node_modules/monaco-editor/min/vs' } });
+require(['vs/editor/editor.main'], function () {
+  const D = DustCore, B = BlackHoleCore;
+  const params = new URLSearchParams(location.search);
+
+  // ---------------------------------------------------------------- CSS classes
+  const sheet = document.createElement('style');
+  document.head.appendChild(sheet);
+  const classes = new Map();
+  let nextId = 0;
+  function cls(key, opts, pseudo) {
+    if (classes.has(key)) return classes.get(key);
+    const name = 'fx' + (nextId++);
+    let css = pseudo ? "content:'';" : '';
+    if (opts.textDecoration !== undefined) css += 'text-decoration:' + opts.textDecoration + ';';
+    if (opts.opacity !== undefined) css += 'opacity:' + opts.opacity + ';';
+    if (opts.backgroundColor) css += 'background-color:' + opts.backgroundColor + ';';
+    const sel = '.monaco-editor .' + name + (pseudo ? '::' + pseudo : '');
+    sheet.sheet.insertRule(sel + '{' + css + '}', sheet.sheet.cssRules.length);
+    classes.set(key, name);
+    return name;
+  }
+  function msgClass(text) {
+    return cls('msg|' + text, { textDecoration: 'none; color: #9a9a9a; font-style: italic; margin-left: 6ch; content: ' + JSON.stringify(text) }, 'before');
+  }
+
+  // ---------------------------------------------------------------- editor
+  const code = `package com.example.pipeline;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
+/** Runs build stages on workers and retries flaky steps. */
+public final class StageRunner {
+    private static final int MAX_ATTEMPTS = 3;
+    private final WorkerPool pool;
+    private final Metrics metrics;
+
+    public StageRunner(WorkerPool pool, Metrics metrics) {
+        this.pool = pool;
+        this.metrics = metrics;
+    }
+
+    public CompletableFuture<Result> run(Stage stage) {
+        return pool.submit(() -> attempt(stage, 1))
+            .whenComplete((r, err) -> metrics.record(stage.name(), r, err));
+    }
+
+    private Result attempt(Stage stage, int n) {
+        try {
+            return stage.execute(Duration.ofMinutes(10));
+        } catch (TransientException e) {
+            if (n >= MAX_ATTEMPTS) throw e;
+            sleep(backoff(n));
+            return attempt(stage, n + 1);
+        }
+    }
+
+    private static Duration backoff(int n) {
+        return Duration.ofMillis((long) (200 * Math.pow(2, n)));
+    }
+
+    List<String> stageNames(List<Stage> stages) {
+        return stages.stream().map(Stage::name).toList();
+    }
+}
+`;
+  const editor = monaco.editor.create(document.getElementById('ed'), {
+    value: code, language: 'java', theme: 'vs-dark', fontSize: 14,
+    minimap: { enabled: false }, automaticLayout: true, scrollBeyondLastLine: false
+  });
+  const model = editor.getModel();
+  const coll = editor.createDecorationsCollection();
+  const TAB = 4;
+  const seed = Number(params.get('seed') || 20261120);
+
+  function windowLines() {
+    const vr = editor.getVisibleRanges();
+    return { lo: vr[0].startLineNumber - 1, hi: vr[vr.length - 1].endLineNumber - 1 };
+  }
+  const range = (line, a, b) => new monaco.Range(line + 1, a + 1, line + 1, b + 1);
+
+  // ---------------------------------------------------------------- dust
+  const dustCache = new Map();
+  function dustDecorations(t, lo, hi) {
+    const decs = [];
+    for (let line = lo; line <= hi; line++) {
+      let ch = dustCache.get(line);
+      if (!ch) { ch = D.lineChunks(model.getLineContent(line + 1), line, seed); dustCache.set(line, ch); }
+      for (const c of ch) {
+        const s = D.chunkState(c, t);
+        if (s >= 0) decs.push({ range: range(line, c.start, c.end), options: { inlineClassName: cls('dust' + s, D.typeOptions(s, 0)) } });
+      }
+    }
+    const fl = D.flashLevel(t);
+    if (fl >= 0) decs.push({ range: new monaco.Range(lo + 1, 1, hi + 1, 1), options: { isWholeLine: true, className: cls('dflash' + fl, D.flashOptions(fl)) } });
+    return decs;
+  }
+
+  // ---------------------------------------------------------------- black hole
+  const bhCache = new Map();
+  let hole = null;
+  function blackHoleDecorations(t, lo, hi) {
+    if (!hole) {
+      const texts = [];
+      for (let l = lo; l <= hi; l++) texts.push(model.getLineContent(l + 1));
+      hole = B.pickHole(texts, lo, TAB);
+    }
+    const decs = [];
+    for (let line = lo; line <= hi; line++) {
+      let ch = bhCache.get(line);
+      if (!ch) { ch = B.lineChunks(model.getLineContent(line + 1), line, seed, TAB, hole); bhCache.set(line, ch); }
+      for (const c of ch) {
+        const r = range(line, c.start, c.end);
+        decs.push({ range: r, options: { inlineClassName: cls('x' + c.vx, B.vecXOptions(c.vx)) } });
+        decs.push({ range: r, options: { inlineClassName: cls('y' + c.vy, B.vecYOptions(c.vy)) } });
+        const s = B.chunkState(c, t);
+        if (s >= 0) decs.push({ range: r, options: { inlineClassName: cls('bh' + s, B.stageOptions(s, 0)) } });
+      }
+    }
+    const h = B.holeLevel(t);
+    if (h) {
+      const r = new monaco.Range(hole.line + 1, 1, hole.line + 1, 1);
+      decs.push({ range: r, options: { beforeContentClassName: cls(`disk${hole.col}|${h.size}|${h.angle}`, B.diskOptions(hole.col, h.size, h.angle), 'before') } });
+      decs.push({ range: r, options: { afterContentClassName: cls(`hor${hole.col}|${h.size}`, B.shadowOptions(hole.col, h.size), 'after') } });
+    }
+    const fl = B.flashLevel(t);
+    if (fl >= 0) decs.push({ range: new monaco.Range(lo + 1, 1, hi + 1, 1), options: { isWholeLine: true, className: cls('bflash' + fl, B.flashOptions(fl)) } });
+    return decs;
+  }
+
+  // ---------------------------------------------------------------- render(t)
+  const durationOf = (effect) => (effect === 'dust' ? D.DURATION : B.DURATION);
+  function renderAt(effect, t, msg) {
+    const { lo, hi } = windowLines();
+    const decs = effect === 'dust' ? dustDecorations(t, lo, hi) : blackHoleDecorations(t, lo, hi);
+    if (msg) {
+      const mid = Math.floor((lo + hi) / 2) + 1;
+      decs.push({ range: new monaco.Range(mid, 1, mid, 1), options: { beforeContentClassName: msgClass(msg) } });
+    }
+    coll.set(decs);
+  }
+
+  // ---------------------------------------------------------------- player (time-based)
+  const ui = {
+    effect: document.getElementById('effect'), play: document.getElementById('play'),
+    scrub: document.getElementById('scrub'), t: document.getElementById('t'), speed: document.getElementById('speed')
+  };
+  if (params.get('ui') === '0') document.getElementById('ui').style.display = 'none';
+  if (params.get('effect')) ui.effect.value = params.get('effect');
+  const REST = 2;            // seconds of rest in the preview
+  let t = Number(params.get('t') || 0);
+  let phase = 'idle';        // idle | out | rest | in
+  let restLeft = 0;
+  let last = null;
+
+  function show() {
+    const effect = ui.effect.value;
+    ui.scrub.max = durationOf(effect).toFixed(3);
+    ui.scrub.value = t;
+    ui.t.textContent = 't = ' + t.toFixed(3);
+    renderAt(effect, t, phase === 'rest' ? `Rest your eyes. Look at something far away.  0:0${Math.ceil(restLeft)}` : null);
+  }
+
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const dt = last === null ? 0 : Math.min((now - last) / 1000, 0.1) * Number(ui.speed.value);
+    last = now;
+    if (phase === 'idle') return;
+    const dur = durationOf(ui.effect.value);
+    if (phase === 'out') { t = Math.min(dur, t + dt); if (t >= dur) { phase = 'rest'; restLeft = REST; } }
+    else if (phase === 'rest') { restLeft -= dt; if (restLeft <= 0) phase = 'in'; }
+    else if (phase === 'in') { t = Math.max(0, t - dt); if (t <= 0) phase = 'idle'; }
+    show();
+    ui.play.textContent = phase === 'idle' ? 'Play break' : 'Stop';
+  }
+
+  ui.play.onclick = () => { if (phase === 'idle') { t = 0; phase = 'out'; } else { phase = 'idle'; } show(); };
+  ui.scrub.oninput = () => { phase = 'idle'; t = Number(ui.scrub.value); show(); };
+  ui.effect.onchange = () => { phase = 'idle'; t = 0; show(); };
+
+  window.renderAt = renderAt;
+  window.durationOf = durationOf;
+  show();
+  requestAnimationFrame(frame);
+  window.ready = true;
+});
+</script>
+</body>
+</html>
